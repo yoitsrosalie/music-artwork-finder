@@ -34,6 +34,7 @@ st.divider()
 def search_spotify(artist, track, client_id, client_secret, search_type='track_or_album'):
     """
     Search Spotify for artwork
+    search_type: 'artist', 'track', or 'track_or_album'
     Returns: dict with image_url, source, and metadata
     """
     try:
@@ -47,34 +48,65 @@ def search_spotify(artist, track, client_id, client_secret, search_type='track_o
         auth_response.raise_for_status()
         access_token = auth_response.json()['access_token']
         
-        # Search for track
-        search_url = 'https://api.spotify.com/v1/search'
         headers = {'Authorization': f'Bearer {access_token}'}
-        params = {
-            'q': f'artist:{artist} track:{track}',
-            'type': 'track',
-            'limit': 1
-        }
+        search_url = 'https://api.spotify.com/v1/search'
         
-        response = requests.get(search_url, headers=headers, params=params)
-        response.raise_for_status()
-        data = response.json()
-        
-        if data['tracks']['items']:
-            track_data = data['tracks']['items'][0]
-            album = track_data['album']
+        # Handle artist-only search
+        if search_type == 'artist':
+            params = {
+                'q': artist,
+                'type': 'artist',
+                'limit': 1
+            }
             
-            # Get highest resolution image
-            if album['images']:
-                image = album['images'][0]  # Spotify returns images sorted by size
-                return {
-                    'source': 'Spotify',
-                    'image_url': image['url'],
-                    'width': image['width'],
-                    'height': image['height'],
-                    'album_name': album['name'],
-                    'found': True
-                }
+            response = requests.get(search_url, headers=headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data['artists']['items']:
+                artist_data = data['artists']['items'][0]
+                
+                if artist_data['images']:
+                    image = artist_data['images'][0]
+                    return {
+                        'source': 'Spotify',
+                        'image_url': image['url'],
+                        'width': image['width'],
+                        'height': image['height'],
+                        'artist_name': artist_data['name'],
+                        'type': 'Artist Photo',
+                        'found': True
+                    }
+        
+        # Handle track/album search
+        else:
+            params = {
+                'q': f'artist:{artist} track:{track}',
+                'type': 'track',
+                'limit': 1
+            }
+            
+            response = requests.get(search_url, headers=headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data['tracks']['items']:
+                track_data = data['tracks']['items'][0]
+                album = track_data['album']
+                
+                # Get highest resolution image
+                if album['images']:
+                    image = album['images'][0]
+                    return {
+                        'source': 'Spotify',
+                        'image_url': image['url'],
+                        'width': image['width'],
+                        'height': image['height'],
+                        'album_name': album['name'],
+                        'track_name': track_data['name'],
+                        'type': 'Track/Album',
+                        'found': True
+                    }
         
         return {'found': False, 'source': 'Spotify'}
         
@@ -85,53 +117,82 @@ def search_spotify(artist, track, client_id, client_secret, search_type='track_o
 def search_itunes(artist, track='', album='', search_type='track_or_album'):
     """
     Search iTunes for artwork
+    search_type: 'artist', 'track', 'album', or 'track_or_album'
     Returns: dict with image_url, source, and metadata
     """
     try:
         search_url = 'https://itunes.apple.com/search'
         
-        # Determine what to search for based on search_type
+        # Artist-only search
         if search_type == 'artist':
-            # Search for artist - we'll get their top album as proxy for artist image
+            # Get artist's most popular album as proxy for artist image
+            # (iTunes rarely returns artist photos directly, albums work better)
             params = {
                 'term': artist,
                 'entity': 'album',
                 'limit': 1,
                 'sort': 'popular'
             }
+            
+            response = requests.get(search_url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data['results']:
+                result = data['results'][0]
+                artwork_url = result.get('artworkUrl100', '').replace('100x100bb', '3000x3000bb')
+                
+                return {
+                    'source': 'iTunes',
+                    'image_url': artwork_url,
+                    'width': 3000,
+                    'height': 3000,
+                    'artist_name': result.get('artistName', artist),
+                    'type': 'Artist Photo',
+                    'found': True
+                }
+        
+        # Track or Album search
         elif search_type == 'track_or_album':
-            # Try as album first (usually more reliable)
-            params = {
-                'term': f'{artist} {track}',  # track variable holds the album name
-                'entity': 'album',
-                'limit': 1
-            }
-        else:  # track_and_album or default
-            # Search for specific track
+            # Try as track first
             params = {
                 'term': f'{artist} {track}',
                 'entity': 'song',
                 'limit': 1
             }
-        
-        response = requests.get(search_url, params=params)
-        response.raise_for_status()
-        data = response.json()
-        
-        if data['results']:
-            result = data['results'][0]
-            artwork_url = result.get('artworkUrl100', '').replace('100x100bb', '3000x3000bb')
             
-            return {
-                'source': 'iTunes',
-                'image_url': artwork_url,
-                'width': 3000,
-                'height': 3000,
-                'album_name': result.get('collectionName', 'Unknown'),
-                'artist_name': result.get('artistName', artist),
-                'found': True,
-                'search_type': search_type
-            }
+            response = requests.get(search_url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            # If track not found, try as album
+            if not data['results']:
+                params = {
+                    'term': f'{artist} {track}',
+                    'entity': 'album',
+                    'limit': 1
+                }
+                response = requests.get(search_url, params=params)
+                response.raise_for_status()
+                data = response.json()
+            
+            if data['results']:
+                result = data['results'][0]
+                artwork_url = result.get('artworkUrl100', '').replace('100x100bb', '3000x3000bb')
+                
+                result_type = 'Track' if result.get('kind') == 'song' else 'Album'
+                
+                return {
+                    'source': 'iTunes',
+                    'image_url': artwork_url,
+                    'width': 3000,
+                    'height': 3000,
+                    'album_name': result.get('collectionName', 'Unknown'),
+                    'artist_name': result.get('artistName', artist),
+                    'track_name': result.get('trackName', ''),
+                    'type': result_type,
+                    'found': True
+                }
         
         return {'found': False, 'source': 'iTunes'}
         
@@ -239,33 +300,26 @@ with tab1:
     if entries_text:
         for line in entries_text.strip().split('\n'):
             if line.strip():
-                parts = [p.strip() for p in line.split(' - ')]
-                if len(parts) == 1:
-                    # Just artist - we'll search for artist photo
+                # Check if line contains the delimiter ' - '
+                if ' - ' not in line:
+                    # Just artist name → Artist photo search
                     entries.append({
-                        'artist': parts[0],
+                        'artist': line.strip(),
                         'track': '',
                         'album': '',
                         'search_type': 'artist'
                     })
-                elif len(parts) == 2:
-                    # Artist - Something (could be track OR album)
-                    # We'll try to detect which based on capitalization/length
-                    # For now, let's search for both and return best match
-                    entries.append({
-                        'artist': parts[0],
-                        'track': parts[1],  # Could be track or album name
-                        'album': parts[1],  # We'll search both
-                        'search_type': 'track_or_album'
-                    })
-                elif len(parts) >= 3:
-                    # Artist - Track - Album (old format, still support it)
-                    entries.append({
-                        'artist': parts[0],
-                        'track': parts[1],
-                        'album': parts[2],
-                        'search_type': 'track_and_album'
-                    })
+                else:
+                    # Artist - Title format → Track/Album search
+                    parts = [p.strip() for p in line.split(' - ', 1)]  # Split only on first ' - '
+                    if len(parts) == 2:
+                        entries.append({
+                            'artist': parts[0],
+                            'track': parts[1],
+                            'album': parts[1],
+                            'search_type': 'track_or_album'
+                        })
+
 with tab2:
     st.markdown("**Upload a CSV file** with columns: `Artist`, `Track`, and optionally `Album`")
     
@@ -280,16 +334,27 @@ with tab2:
             df = pd.read_csv(uploaded_file)
             
             # Check for required columns
-            if 'Artist' in df.columns and 'Track' in df.columns:
+            if 'Artist' in df.columns:
                 for _, row in df.iterrows():
+                    artist = str(row['Artist']).strip()
+                    track = str(row.get('Track', '')).strip()
+                    album = str(row.get('Album', '')).strip()
+                    
+                    # Determine search type based on Track field
+                    if not track or track == 'nan':
+                        search_type = 'artist'
+                    else:
+                        search_type = 'track_or_album'
+                    
                     entries.append({
-                        'artist': str(row['Artist']).strip(),
-                        'track': str(row['Track']).strip(),
-                        'album': str(row.get('Album', '')).strip()
+                        'artist': artist,
+                        'track': track if track != 'nan' else '',
+                        'album': album if album != 'nan' else '',
+                        'search_type': search_type
                     })
                 st.success(f"✅ Loaded {len(entries)} entries from CSV")
             else:
-                st.error("❌ CSV must have 'Artist' and 'Track' columns")
+                st.error("❌ CSV must have 'Artist' column")
         except Exception as e:
             st.error(f"❌ Error reading CSV: {e}")
 
@@ -310,7 +375,9 @@ if st.button("🔍 Search for Artwork", type="primary", disabled=len(entries) ==
     status_text = st.empty()
     
     for i, entry in enumerate(entries):
-        status_text.text(f"Searching {i+1}/{len(entries)}: {entry['artist']} - {entry['track']}")
+        # Fix #1: Better progress text for artist-only searches
+        display_text = f"{entry['artist']} - {entry['track']}" if entry['track'] else entry['artist']
+        status_text.text(f"Searching {i+1}/{len(entries)}: {display_text}")
         
         # Search both APIs
         spotify_result = None
@@ -319,15 +386,16 @@ if st.button("🔍 Search for Artwork", type="primary", disabled=len(entries) ==
                 entry['artist'], 
                 entry['track'],
                 spotify_client_id,
-                spotify_client_secret
+                spotify_client_secret,
+                entry.get('search_type', 'track_or_album')
             )
         
-      itunes_result = search_itunes(
-    entry['artist'], 
-    entry.get('track', ''), 
-    entry.get('album', ''),
-    entry.get('search_type', 'track_or_album')
-)
+        itunes_result = search_itunes(
+            entry['artist'], 
+            entry.get('track', ''), 
+            entry.get('album', ''),
+            entry.get('search_type', 'track_or_album')
+        )
         
         # Prefer Spotify if available, fall back to iTunes
         best_result = None
@@ -387,8 +455,9 @@ if 'results' in st.session_state and st.session_state['results']:
                         if result['best'] and result['best'].get('image_url'):
                             img_data = download_image(result['best']['image_url'])
                             if img_data:
-                                # Clean filename
-                                filename = f"{result['artist']}_{result['track']}.jpg".replace('/', '_').replace('\\', '_')
+                                # Fix #2: Better filenames for artist photos
+                                track_part = result['track'] if result['track'] else 'artist_photo'
+                                filename = f"{result['artist']}_{track_part}.jpg".replace('/', '_').replace('\\', '_')
                                 zip_file.writestr(filename, img_data)
                 
                 st.download_button(
@@ -407,9 +476,15 @@ if 'results' in st.session_state and st.session_state['results']:
             
             with col1:
                 st.markdown(f"**{result['artist']}**")
-            
+
             with col2:
-                st.markdown(f"{result['track']}")
+                track_display = result['track'] if result['track'] else '(Artist Photo)'
+                artwork_type = result['best'].get('type', '') if result['best'] else ''
+                if artwork_type:
+                    st.markdown(f"{track_display}")
+                    st.caption(f"Type: {artwork_type}")
+                else:
+                    st.markdown(f"{track_display}")
             
             with col3:
                 if result['best']:
@@ -422,7 +497,9 @@ if 'results' in st.session_state and st.session_state['results']:
                 if result['best'] and result['best'].get('image_url'):
                     img_data = download_image(result['best']['image_url'])
                     if img_data:
-                        filename = f"{result['artist']}_{result['track']}.jpg".replace('/', '_').replace('\\', '_')
+                        # Fix #2: Better filenames for artist photos (individual downloads)
+                        track_part = result['track'] if result['track'] else 'artist_photo'
+                        filename = f"{result['artist']}_{track_part}.jpg".replace('/', '_').replace('\\', '_')
                         st.download_button(
                             "⬇️ Download",
                             data=img_data,
@@ -440,6 +517,6 @@ if 'results' in st.session_state and st.session_state['results']:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666; font-size: 0.9em;'>
-Built by [Your Name] | Product Manager
+Built by Rosalie Cabison | Music & Tech PM
 </div>
 """, unsafe_allow_html=True)
