@@ -504,7 +504,7 @@ def render_download_ui(key_suffix=""):
             key=f"dl_btn_{key_suffix}" # Unique key required for duplicate buttons
         )
     else:
-        st.info("💡 Select artwork from the gallery below to include it in your ZIP.")
+        st.info("💡 Select artwork from the gallery to include it in your ZIP.")
 
 if 'results' in st.session_state and st.session_state['results']:
     
