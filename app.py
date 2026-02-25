@@ -463,7 +463,9 @@ def render_image_options(i, options):
     for opt_idx, opt in enumerate(options):
         with cols[opt_idx]:
             # Render the image and captions
-            st.image(opt['preview_url'], use_container_width=True)
+            image_url = opt.get('preview_url') or opt.get('image_url') 
+            if image_url:
+                st.image(image_url, use_container_width=True)
             st.caption(f"{opt['album_name'][:25]}...")
             st.caption(f"**{opt['type']}**")
             
