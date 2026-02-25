@@ -66,7 +66,19 @@ st.markdown("""
 # API SEARCH FUNCTIONS
 # ============================================
 
-def search_spotify(artist, track, client_id, client_secret, search_type='track_or_album'):
+@st.cache_data
+def get_spotify_token(client_id, client_secret):
+    auth_url = 'https://accounts.spotify.com/api/token'
+    auth_response = requests.post(auth_url, {
+        'grant_type': 'client_credentials',
+        'client_id': client_id,
+        'client_secret': client_secret,
+    })
+    auth_response.raise_for_status()
+    return auth_response.json()['access_token']
+
+@st.cache_data
+def search_spotify(artist, track, client_id, client_secret, search_type='track_or_album', album=''):
     """
     Search Spotify for artwork
     search_type: 'artist', 'track', 'album', or 'track_or_album'
@@ -74,15 +86,8 @@ def search_spotify(artist, track, client_id, client_secret, search_type='track_o
     """
     try:
         # Get Spotify access token
-        auth_url = 'https://accounts.spotify.com/api/token'
-        auth_response = requests.post(auth_url, {
-            'grant_type': 'client_credentials',
-            'client_id': client_id,
-            'client_secret': client_secret,
-        })
-        auth_response.raise_for_status()
-        access_token = auth_response.json()['access_token']
-        
+        access_token = get_spotify_token(client_id, client_secret)
+     
         headers = {'Authorization': f'Bearer {access_token}'}
         search_url = 'https://api.spotify.com/v1/search'
         
@@ -109,6 +114,7 @@ def search_spotify(artist, track, client_id, client_secret, search_type='track_o
                         'width': image['width'],
                         'height': image['height'],
                         'artist_name': artist_data['name'],
+                        'album_name': artist_data['name'],
                         'type': 'Artist Photo',
                         'found': True
                     }
@@ -116,7 +122,7 @@ def search_spotify(artist, track, client_id, client_secret, search_type='track_o
         # SPECIFIC ALBUM search
         elif search_type == 'album':
             params = {
-                'q': f'artist:{artist} album:{track}',
+                'q': f'artist:{artist} album:{album}',
                 'type': 'album',
                 'limit': 1
             }
