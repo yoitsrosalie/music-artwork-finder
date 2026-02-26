@@ -94,7 +94,7 @@ def search_spotify(artist, track, client_id, client_secret, search_type='track_o
         # Handle artist-only search
         if search_type == 'artist':
             params = {
-                'q': artist,
+                'q': f'artist:{artist}',
                 'type': 'artist',
                 'limit': 5
             }
@@ -105,6 +105,8 @@ def search_spotify(artist, track, client_id, client_secret, search_type='track_o
             
             all_results = []
             for artist_data in data['artists']['items']:
+                if artist_data['name'].lower() != artist.lower():
+                    continue
                 if artist_data['images']:
                     image = artist_data['images'][0]
                     all_results.append({
