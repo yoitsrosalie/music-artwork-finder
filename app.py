@@ -151,8 +151,8 @@ def search_spotify(artist, track, client_id, client_secret, search_type='track_o
         # Handle song/album search (SONG specific or AUTO)
         else:
             params = {
-                'q': f'artist:{artist} track:{track}',
-                'type': 'track',
+                'q': f'artist:{artist} {track}',
+                'type': 'track,album',
                 'limit': 5
             }
             
@@ -453,7 +453,9 @@ if st.button("🔍 Search for Artwork", type="primary", disabled=len(entries) ==
 # 1. Add this function above your main loop
 @st.fragment
 def render_image_options(i, options):
-    cols = st.columns(len(options))
+    num_cols = min(len(options), 5)
+    col_count = max(num_cols, 3)
+    cols = st.columns(col_count)
     current_choice = st.session_state.selected_images.get(i)
     
     for opt_idx, opt in enumerate(options):
