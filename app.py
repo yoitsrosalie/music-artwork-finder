@@ -438,7 +438,7 @@ st.markdown(
     """
     **Quickly find and download high-quality music artwork.**
 
-    Searches Spotify and iTunes APIs simultaneously. Perfect for editorial teams and content managers.
+    Searches iTunes for artwork by default. Add Spotify credentials in the sidebar to improve results and enable artist photo search.
 
     ⚖️ **Legal Notice:** For internal editorial/operational use only. Album artwork is copyrighted
     material. Consult your legal/compliance team regarding usage rights.
@@ -494,7 +494,7 @@ with st.sidebar:
     with st.expander("ℹ️ About This Tool", expanded=False):
         st.markdown(
             "Helps music industry professionals find and download artwork quickly.\n\n"
-            "- Searches Spotify + iTunes simultaneously\n"
+            "- Searches Spotify and iTunes for each entry (Spotify preferred, iTunes as fallback)\n"
             "- Bulk processing via text or CSV\n"
             "- Download individually or as a ZIP\n"
             "- High-res artwork (up to 3000×3000px)"
@@ -517,9 +517,9 @@ with st.sidebar:
 spotify_enabled = bool(spotify_client_id and spotify_client_secret)
 
 if not spotify_enabled:
-    st.warning(
-        "⚠️ Add Spotify credentials in the sidebar to enable Spotify search. "
-        "iTunes search works without credentials."
+    st.info(
+        "ℹ️ Running in iTunes-only mode. Add Spotify credentials in the sidebar for better results "
+        "and artist photo support."
     )
 
 st.subheader("📝 Input Music Entries")
@@ -530,9 +530,8 @@ entries = []
 with tab_text:
     st.markdown(
         "Paste entries one per line:\n"
-        "- `Artist` → Artist photo\n"
-        "- `Artist - Song` → Single/song artwork\n"
-        "- `Artist - Album` → Album artwork"
+        "- `Artist` → Artist photo *(requires Spotify; iTunes will return albums instead)*\n"
+        "- `Artist - Title` → Track or album artwork (both are searched)"
     )
     raw_text = st.text_area(
         "Music Entries",
@@ -544,7 +543,7 @@ with tab_text:
         entries = parse_text_entries(raw_text)
 
 with tab_csv:
-    st.markdown("Upload a CSV with columns: `Artist`, `Track` (required), `Album` (optional).")
+    st.markdown("Upload a CSV with columns: `Artist` (required), `Track` (optional), `Album` (optional). Rows without a `Track` value will trigger an artist photo search.")
     uploaded_file = st.file_uploader("Choose CSV file", type=["csv"], label_visibility="collapsed")
     if uploaded_file:
         entries = parse_csv_entries(uploaded_file)
@@ -564,7 +563,11 @@ if st.button("🔍 Search for Artwork", type="primary", disabled=not entries):
     status_placeholder = st.empty()
 
     for i, entry in enumerate(entries):
-        display_label = f"{entry['artist']} — {entry['track']}" if entry["track"] else entry["artist"]
+        display_label = (
+            f"{entry['artist']} — {entry['track']}"
+            if entry["track"]
+            else f"{entry['artist']} (artist photo)"
+        )
         status_placeholder.text(f"Searching {i + 1}/{len(entries)}: {display_label}")
 
         spotify_results = (
