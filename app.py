@@ -96,19 +96,18 @@ def search_spotify(artist, track, client_id, client_secret, search_type='track_o
             params = {
                 'q': artist,
                 'type': 'artist',
-                'limit': 1
+                'limit': 5
             }
             
             response = requests.get(search_url, headers=headers, params=params)
             response.raise_for_status()
             data = response.json()
             
-            if data['artists']['items']:
-                artist_data = data['artists']['items'][0]
-                
+            all_results = []
+            for artist_data in data['artists']['items']:
                 if artist_data['images']:
                     image = artist_data['images'][0]
-                    return {
+                    all_results.append({
                         'source': 'Spotify',
                         'image_url': image['url'],
                         'width': image['width'],
@@ -117,75 +116,73 @@ def search_spotify(artist, track, client_id, client_secret, search_type='track_o
                         'album_name': artist_data['name'],
                         'type': 'Artist Photo',
                         'found': True
-                    }
-        
+                    })
+            return all_results
+            
         # SPECIFIC ALBUM search
         elif search_type == 'album':
             params = {
                 'q': f'artist:{artist} album:{album}',
                 'type': 'album',
-                'limit': 1
+                'limit': 5
             }
             
             response = requests.get(search_url, headers=headers, params=params)
             response.raise_for_status()
             data = response.json()
             
-            if data['albums']['items']:
-                album = data['albums']['items'][0]
-                
-                if album['images']:
-                    image = album['images'][0]
-                    # Use Spotify's album_type to label accurately
-                    album_type = album.get('album_type', 'album')
+            all_results = []
+            for album_data in data['albums']['items']:
+                if album_data['images']:
+                    image = album_data['images'][0]
+                    album_type = album_data.get('album_type', 'album')
                     result_type = 'Single' if album_type == 'single' else 'Album'
-                    return {
+                    all_results.append({
                         'source': 'Spotify',
                         'image_url': image['url'],
                         'width': image['width'],
                         'height': image['height'],
-                        'album_name': album['name'],
+                        'album_name': album_data['name'],
                         'type': result_type,
                         'found': True
-                    }
-        
+                    })
+            return all_results
+            
         # Handle song/album search (SONG specific or AUTO)
         else:
             params = {
                 'q': f'artist:{artist} track:{track}',
                 'type': 'track',
-                'limit': 1
+                'limit': 5
             }
             
             response = requests.get(search_url, headers=headers, params=params)
             response.raise_for_status()
             data = response.json()
             
-            if data['tracks']['items']:
-                track_data = data['tracks']['items'][0]
-                album = track_data['album']
-                
-                # Get highest resolution image
-                if album['images']:
-                    image = album['images'][0]
-                    # Use Spotify's album_type to detect Single vs Album
-                    album_type = album.get('album_type', 'album')
+            all_results = []
+            for track_data in data['tracks']['items']:
+                album_data = track_data['album']
+                if album_data['images']:
+                    image = album_data['images'][0]
+                    album_type = album_data.get('album_type', 'album')
                     result_type = 'Single' if album_type == 'single' else 'Album'
-                    return {
+                    all_results.append({
                         'source': 'Spotify',
                         'image_url': image['url'],
                         'width': image['width'],
                         'height': image['height'],
-                        'album_name': album['name'],
+                        'album_name': album_data['name'],
                         'track_name': track_data['name'],
                         'type': result_type,
                         'found': True
-                    }
+                    })
+            return all_results
         
-        return {'found': False, 'source': 'Spotify'}
+        return []
         
     except Exception as e:
-        return {'found': False, 'source': 'Spotify', 'error': str(e)}
+        return []
 
 
 @st.cache_data
@@ -428,15 +425,8 @@ if st.button("🔍 Search for Artwork", type="primary", disabled=len(entries) ==
         )
         
         # Prefer Spotify if available, fall back to iTunes
-        best_result = None
-        options = []
-
-        if spotify_result and spotify_result.get('found'):
-            best_result = spotify_result
-            options = [spotify_result] # Wrap in list for gallery consistency
-        elif itunes_result: # itunes_result is now a list
-            best_result = itunes_result[0]
-            options = itunes_result
+        options = spotify_result or itunes_result
+        best_result = options[0] if options else None
 
         results.append({
             'artist': entry['artist'],
