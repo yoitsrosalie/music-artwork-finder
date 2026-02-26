@@ -5,6 +5,7 @@ from io import BytesIO
 import zipfile
 import base64
 from urllib.parse import quote
+import os
 
 # Page config
 st.set_page_config(
@@ -265,8 +266,11 @@ with st.sidebar:
         2. Create an app
         3. Copy credentials below:
         """)
-        spotify_client_id = st.text_input("Spotify Client ID", type="password")
-        spotify_client_secret = st.text_input("Spotify Client Secret", type="password")
+        default_id = os.environ.get('SPOTIFY_CLIENT_ID', '')
+        default_secret = os.environ.get('SPOTIFY_CLIENT_SECRET', '')
+
+        spotify_client_id = st.text_input("Spotify Client ID", value=default_id, type="password")
+        spotify_client_secret = st.text_input("Spotify Client Secret", value=default_secret, type="password")
 
     # 2. Collapsible About Section
     with st.expander("ℹ️ About This Tool", expanded=False):
