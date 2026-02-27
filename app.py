@@ -485,7 +485,7 @@ with tab_text:
         entries = parse_text_entries(raw_text)
 
 with tab_csv:
-    st.markdown("Upload a CSV with columns: `Artist` (required), `Track` (optional), `Album` (optional).")
+    st.markdown("Upload a CSV with columns: `Artist` (required), `Track` (optional), `Album` (optional). Rows without a `Track` value trigger an artist photo search *(requires Spotify; iTunes will return albums instead)*.")
     uploaded_file = st.file_uploader("Choose CSV file", type=["csv"], label_visibility="collapsed")
     if uploaded_file:
         entries = parse_csv_entries(uploaded_file)
@@ -612,7 +612,7 @@ if st.session_state.get("results"):
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Entries", len(results))
     col2.metric("Found Artwork", found_count)
-    col3.metric("Missing Artwork", len(results) - found_count)
+    col3.metric("Not Found", len(results) - found_count)
 
     st.divider()
 
