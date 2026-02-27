@@ -65,7 +65,6 @@ def fetch_spotify_token(client_id: str, client_secret: str) -> Optional[str]:
         return None
 
 
-@st.cache_data
 def search_spotify(
     artist: str,
     track: str,
@@ -207,7 +206,6 @@ def _spotify_track_search(artist: str, track: str, headers: dict) -> list[Artwor
     return deduped
 
 
-@st.cache_data
 def search_itunes(
     artist: str,
     track: str = "",
