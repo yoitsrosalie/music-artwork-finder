@@ -572,7 +572,7 @@ def render_image_options(result_index: int, result: dict, options: list[ArtworkR
 
     track_part = result.get("track") or "artist_photo"
 
-    for opt_idx, option in enumerate(options):
+    for opt_idx, option in enumerate(options[:num_cols]):
         with cols[opt_idx]:
             display_url = option.get("preview_url") or option.get("image_url")
             if display_url:
