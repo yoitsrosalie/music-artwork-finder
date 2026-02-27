@@ -15,537 +15,627 @@ Author: Rosalie Cabison | Music & Tech PM
 import streamlit as st
 import requests
 import pandas as pd
-import base64
-from urllib.parse import quote
 import os
-
-# Page config
-st.set_page_config(
-    page_title="Music Artwork Finder",
-    page_icon="🎵",
-    layout="wide"
-)
-
-# Title and description
-st.title("🎵 Music Artwork Finder")
-st.markdown("""
-**Quickly find and download high-quality music artwork.**
-
-This tool searches Spotify and iTunes APIs to find album, track, and artist artwork.
-Perfect for music industry professionals, editorial teams, and content managers who need to source artwork efficiently.
-
-⚖️ **Legal Notice:** For internal editorial/operational use only. Album artwork is copyrighted material owned by labels and artists. 
-This tool is designed for legitimate business workflows. Consult your legal/compliance team regarding usage rights.
-""")
-
-st.divider()
-
-st.markdown("""
-<style>
-/* Make the image container positioned so we can overlay the button */
-[data-testid="stImage"] {
-    position: relative;
-    cursor: pointer;
-}
-
-/* Grab the fullscreen button and center it over the image */
-[data-testid="stFullScreenFrame"] button,
-[data-testid="stImage"] button {
-    position: absolute !important;
-    top: 50% !important;
-    left: 50% !important;
-    transform: translate(-50%, -50%) !important;
-    right: auto !important;
-    bottom: auto !important;
-    width: 44px !important;
-    height: 44px !important;
-    background: rgba(255,255,255,0.15) !important;
-    backdrop-filter: blur(4px) !important;
-    border-radius: 50% !important;
-    border: 1.5px solid rgba(255,255,255,0.4) !important;
-    opacity: 0;
-    transition: opacity 0.2s ease;
-}
-
-/* Only show it on hover */
-[data-testid="stImage"]:hover button {
-    opacity: 1 !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
+from typing import Optional
 
 # ============================================
-# API SEARCH FUNCTIONS
+# CONSTANTS
+# ============================================
+
+ITUNES_ARTWORK_SIZE = "3000x3000bb"
+ITUNES_ARTWORK_PREVIEW_SIZE = "100x100bb"
+SPOTIFY_AUTH_URL = "https://accounts.spotify.com/api/token"
+SPOTIFY_SEARCH_URL = "https://api.spotify.com/v1/search"
+ITUNES_SEARCH_URL = "https://itunes.apple.com/search"
+
+# ============================================
+# TYPE ALIASES
+# ============================================
+ArtworkResult = dict
+SearchType = str  # "artist" | "track" | "album" | "track_or_album"
+
+
+# ============================================
+# API LAYER
 # ============================================
 
 @st.cache_data
-def get_spotify_token(client_id, client_secret):
-    auth_url = 'https://accounts.spotify.com/api/token'
-    auth_response = requests.post(auth_url, {
-        'grant_type': 'client_credentials',
-        'client_id': client_id,
-        'client_secret': client_secret,
-    })
-    auth_response.raise_for_status()
-    return auth_response.json()['access_token']
-
-@st.cache_data
-def search_spotify(artist, track, client_id, client_secret, search_type='track_or_album', album=''):
+def fetch_spotify_token(client_id: str, client_secret: str) -> Optional[str]:
     """
-    Search Spotify for artwork
-    search_type: 'artist', 'track', 'album', or 'track_or_album'
-    Returns: dict with image_url, source, and metadata
+    Exchange Spotify client credentials for a bearer token.
+    Returns None and surfaces a user-visible warning on failure.
+    Cached so the token is reused across reruns within the same session.
     """
     try:
-        # Get Spotify access token
-        access_token = get_spotify_token(client_id, client_secret)
-     
-        headers = {'Authorization': f'Bearer {access_token}'}
-        search_url = 'https://api.spotify.com/v1/search'
-        
-        # Handle artist-only search
-        if search_type == 'artist':
-            params = {
-                'q': f'artist:{artist}',
-                'type': 'artist',
-                'limit': 5
-            }
-            
-            response = requests.get(search_url, headers=headers, params=params)
-            response.raise_for_status()
-            data = response.json()
-            
-            all_results = []
-            for artist_data in data['artists']['items']:
-                if artist_data['name'].lower() != artist.lower():
-                    continue
-                if artist_data['images']:
-                    image = artist_data['images'][0]
-                    all_results.append({
-                        'source': 'Spotify',
-                        'image_url': image['url'],
-                        'width': image['width'],
-                        'height': image['height'],
-                        'artist_name': artist_data['name'],
-                        'album_name': artist_data['name'],
-                        'type': 'Artist Photo',
-                        'found': True
-                    })
-            return all_results
-            
-        # SPECIFIC ALBUM search
-        elif search_type == 'album':
-            params = {
-                'q': f'artist:{artist} album:{album}',
-                'type': 'album',
-                'limit': 5
-            }
-            
-            response = requests.get(search_url, headers=headers, params=params)
-            response.raise_for_status()
-            data = response.json()
-            
-            all_results = []
-            for album_data in data['albums']['items']:
-                if album_data['images']:
-                    image = album_data['images'][0]
-                    album_type = album_data.get('album_type', 'album')
-                    result_type = 'Single' if album_type == 'single' else 'Album'
-                    all_results.append({
-                        'source': 'Spotify',
-                        'image_url': image['url'],
-                        'width': image['width'],
-                        'height': image['height'],
-                        'album_name': album_data['name'],
-                        'type': result_type,
-                        'found': True
-                    })
-            return all_results
-            
-        # Handle song/album search (SONG specific or AUTO)
-        else:
-            params = {
-                'q': f'artist:{artist} {track}',
-                'type': 'track,album',
-                'limit': 5
-            }
-            
-            response = requests.get(search_url, headers=headers, params=params)
-            response.raise_for_status()
-            data = response.json()
-            
-            all_results = []
-            for track_data in data['tracks']['items']:
-                album_data = track_data['album']
-                if album_data['images']:
-                    image = album_data['images'][0]
-                    album_type = album_data.get('album_type', 'album')
-                    result_type = 'Single' if album_type == 'single' else 'Album'
-                    all_results.append({
-                        'source': 'Spotify',
-                        'image_url': image['url'],
-                        'width': image['width'],
-                        'height': image['height'],
-                        'album_name': album_data['name'],
-                        'track_name': track_data['name'],
-                        'type': result_type,
-                        'found': True
-                    })
-            return all_results
-        
-        return []
-        
-    except Exception as e:
-        return []
-
-
-@st.cache_data
-def search_itunes(artist, track='', album='', search_type='track_or_album'):
-    """
-    Search iTunes and return a LIST of potential artwork matches.
-    """
-    try:
-        search_url = 'https://itunes.apple.com/search'
-        all_results = []
-        
-        # Determine Entity and Query
-        if search_type == 'artist':
-            params = {'term': artist, 'entity': 'album', 'limit': 5, 'sort': 'popular'}
-        elif search_type == 'track':
-            params = {'term': f'{artist} {track}', 'entity': 'song', 'limit': 5}
-        elif search_type == 'album':
-            params = {'term': f'{artist} {album if album else track}', 'entity': 'album', 'limit': 5}
-        else: # track_or_album auto logic
-            query_term = track if track else album
-            params = {'term': f'{artist} {query_term}', 'entity': 'musicTrack', 'limit': 5}
-
-        response = requests.get(search_url, params=params, timeout=10)
+        response = requests.post(
+            SPOTIFY_AUTH_URL,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+        )
         response.raise_for_status()
-        data = response.json()
-        
-        for result in data.get('results', []):
-            thumb = result.get('artworkUrl100', '')
-            # High-res for download, small for the UI grid
-            artwork_url = thumb.replace('100x100bb', '3000x3000bb')
-            
-            # Logic to detect result type
-            coll_name = result.get('collectionName', '').lower()
-            track_name = result.get('trackName', '').lower()
-            if 'single' in coll_name or track_name == coll_name:
-                result_type = 'Single'
-            else:
-                result_type = 'Album'
-
-            all_results.append({
-                'source': 'iTunes',
-                'image_url': artwork_url,
-                'preview_url': thumb, # Critical for fast UI rendering
-                'album_name': result.get('collectionName', 'Unknown'),
-                'artist_name': result.get('artistName', artist),
-                'track_name': result.get('trackName', ''),
-                'type': result_type,
-                'found': True
-            })
-            
-        return all_results # Returns a list now!
-        
+        return response.json()["access_token"]
+    except requests.HTTPError as e:
+        st.warning(f"Spotify auth failed (HTTP {e.response.status_code}). Check your credentials.")
+        return None
     except Exception as e:
-        return [] # Return empty list on error
+        st.warning(f"Spotify auth failed: {e}")
+        return None
 
 
 @st.cache_data
-def download_image(url):
-    """Download image from URL and return bytes"""
+def search_spotify(
+    artist: str,
+    track: str,
+    client_id: str,
+    client_secret: str,
+    search_type: SearchType = "track_or_album",
+    album: str = "",
+) -> list[ArtworkResult]:
+    """
+    Search Spotify for artwork matching the given artist/track/album.
+    Returns an empty list on any failure so callers don't need try/except.
+    """
+    token = fetch_spotify_token(client_id, client_secret)
+    if not token:
+        return []
+
+    headers = {"Authorization": f"Bearer {token}"}
+
+    try:
+        if search_type == "artist":
+            return _spotify_artist_search(artist, headers)
+        elif search_type == "album":
+            return _spotify_album_search(artist, album, headers)
+        else:
+            return _spotify_track_search(artist, track, headers)
+
+    except requests.HTTPError as e:
+        st.warning(f"Spotify search failed (HTTP {e.response.status_code}) for '{artist} - {track}'.")
+        return []
+    except Exception as e:
+        st.warning(f"Spotify search error for '{artist} - {track}': {e}")
+        return []
+
+
+def _spotify_artist_search(artist: str, headers: dict) -> list[ArtworkResult]:
+    """Return artist photo results from Spotify. Only exact name matches are kept."""
+    response = requests.get(
+        SPOTIFY_SEARCH_URL,
+        headers=headers,
+        params={"q": f"artist:{artist}", "type": "artist", "limit": 5},
+    )
+    response.raise_for_status()
+    artists = response.json()["artists"]["items"]
+
+    return [
+        {
+            "source": "Spotify",
+            "image_url": item["images"][0]["url"],
+            "width": item["images"][0]["width"],
+            "height": item["images"][0]["height"],
+            "artist_name": item["name"],
+            "album_name": item["name"],
+            "type": "Artist Photo",
+            "found": True,
+        }
+        for item in artists
+        if item["name"].lower() == artist.lower() and item["images"]
+    ]
+
+
+def _spotify_album_search(artist: str, album: str, headers: dict) -> list[ArtworkResult]:
+    """Return album artwork results from Spotify for a specific album."""
+    response = requests.get(
+        SPOTIFY_SEARCH_URL,
+        headers=headers,
+        params={"q": f"artist:{artist} album:{album}", "type": "album", "limit": 5},
+    )
+    response.raise_for_status()
+    albums = response.json()["albums"]["items"]
+
+    return [
+        {
+            "source": "Spotify",
+            "image_url": item["images"][0]["url"],
+            "width": item["images"][0]["width"],
+            "height": item["images"][0]["height"],
+            "album_name": item["name"],
+            "type": "Single" if item.get("album_type") == "single" else "Album",
+            "found": True,
+        }
+        for item in albums
+        if item["images"]
+    ]
+
+
+def _spotify_track_search(artist: str, track: str, headers: dict) -> list[ArtworkResult]:
+    """
+    Return artwork results from Spotify for a track_or_album search.
+    Collects results from both the tracks and albums sections of the response,
+    then deduplicates by image URL so the same artwork isn't shown twice.
+    """
+    response = requests.get(
+        SPOTIFY_SEARCH_URL,
+        headers=headers,
+        params={"q": f"artist:{artist} {track}", "type": "track,album", "limit": 5},
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    results = []
+
+    # Collect from tracks (returns the parent album's artwork)
+    for item in data.get("tracks", {}).get("items", []):
+        album = item.get("album", {})
+        if album.get("images"):
+            results.append({
+                "source": "Spotify",
+                "image_url": album["images"][0]["url"],
+                "width": album["images"][0]["width"],
+                "height": album["images"][0]["height"],
+                "album_name": album["name"],
+                "track_name": item["name"],
+                "type": "Single" if album.get("album_type") == "single" else "Album",
+                "found": True,
+            })
+
+    # Collect from albums (direct album matches)
+    for item in data.get("albums", {}).get("items", []):
+        if item.get("images"):
+            results.append({
+                "source": "Spotify",
+                "image_url": item["images"][0]["url"],
+                "width": item["images"][0]["width"],
+                "height": item["images"][0]["height"],
+                "album_name": item["name"],
+                "track_name": "",
+                "type": "Single" if item.get("album_type") == "single" else "Album",
+                "found": True,
+            })
+
+    # Deduplicate by image URL — track and album results often share the same artwork
+    seen = set()
+    deduped = []
+    for r in results:
+        if r["image_url"] not in seen:
+            seen.add(r["image_url"])
+            deduped.append(r)
+
+    return deduped
+
+
+@st.cache_data
+def search_itunes(
+    artist: str,
+    track: str = "",
+    album: str = "",
+    search_type: SearchType = "track_or_album",
+) -> list[ArtworkResult]:
+    """
+    Search the iTunes API for artwork.
+
+    For track_or_album searches, makes two requests — one for tracks and one for
+    albums — then merges and deduplicates by image URL. iTunes does not support
+    mixed entity types in a single call, so two calls are required to honour the
+    "both are searched" promise in the UI.
+
+    Returns a list of result dicts (empty on failure).
+    """
+    if search_type == "artist":
+        param_sets = [
+            {"term": artist, "entity": "album", "limit": 5, "sort": "popular"}
+        ]
+    elif search_type == "album":
+        query_title = album if album else track
+        param_sets = [
+            {"term": f"{artist} {query_title}", "entity": "album", "limit": 5}
+        ]
+    else:
+        # track_or_album: query both entity types and merge
+        param_sets = [
+            {"term": f"{artist} {track}", "entity": "musicTrack", "limit": 5},
+            {"term": f"{artist} {track}", "entity": "album", "limit": 5},
+        ]
+
+    raw_results = []
+    for params in param_sets:
+        try:
+            response = requests.get(ITUNES_SEARCH_URL, params=params, timeout=10)
+            response.raise_for_status()
+            raw_results.extend(response.json().get("results", []))
+        except requests.HTTPError as e:
+            st.warning(f"iTunes search failed (HTTP {e.response.status_code}) for '{artist} - {track}'.")
+        except Exception as e:
+            st.warning(f"iTunes search error for '{artist} - {track}': {e}")
+
+    results = []
+    seen_urls = set()
+
+    for item in raw_results:
+        preview_url = item.get("artworkUrl100", "")
+        if not preview_url:
+            continue
+        full_res_url = preview_url.replace(ITUNES_ARTWORK_PREVIEW_SIZE, ITUNES_ARTWORK_SIZE)
+
+        # Deduplicate by full-res URL — track and album calls often return the same artwork
+        if full_res_url in seen_urls:
+            continue
+        seen_urls.add(full_res_url)
+
+        collection_name = item.get("collectionName", "").lower()
+        track_name_lower = item.get("trackName", "").lower()
+        is_single = "single" in collection_name or track_name_lower == collection_name
+        result_type = "Single" if is_single else "Album"
+
+        results.append({
+            "source": "iTunes",
+            "image_url": full_res_url,
+            "preview_url": preview_url,
+            "album_name": item.get("collectionName", "Unknown"),
+            "artist_name": item.get("artistName", artist),
+            "track_name": item.get("trackName", ""),
+            "type": result_type,
+            "found": True,
+        })
+
+    return results
+
+
+@st.cache_data
+def download_image(url: str) -> Optional[bytes]:
+    """
+    Download image bytes from a URL.
+    Cached so repeated downloads of the same URL are free.
+    Returns None on failure instead of raising.
+    """
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         return response.content
-    except:
+    except Exception:
         return None
 
 
 # ============================================
+# PARSING LAYER
+# ============================================
+
+def parse_text_entries(raw_text: str) -> list[dict]:
+    """
+    Parse newline-separated text entries into structured search dicts.
+
+    Supported formats:
+      "Artist"                  → artist photo search
+      "Artist - Song or Album"  → track_or_album search
+    """
+    entries = []
+    for line in raw_text.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        if " - " not in line:
+            entries.append(
+                {"artist": line, "track": "", "album": "", "search_type": "artist"}
+            )
+        else:
+            artist, title = line.split(" - ", maxsplit=1)
+            entries.append(
+                {
+                    "artist": artist.strip(),
+                    "track": title.strip(),
+                    "album": title.strip(),
+                    "search_type": "track_or_album",
+                }
+            )
+    return entries
+
+
+def parse_csv_entries(uploaded_file) -> list[dict]:
+    """
+    Parse an uploaded CSV into structured search dicts.
+    Required column: Artist. Optional columns: Track, Album.
+    """
+    try:
+        df = pd.read_csv(uploaded_file)
+    except Exception as e:
+        st.error(f"Could not read CSV: {e}")
+        return []
+
+    if "Artist" not in df.columns:
+        st.error("CSV must include an 'Artist' column.")
+        return []
+
+    entries = []
+    for _, row in df.iterrows():
+        artist = str(row.get("Artist", "")).strip()
+        track = str(row.get("Track", "")).strip()
+        album = str(row.get("Album", "")).strip()
+
+        track = "" if track == "nan" else track
+        album = "" if album == "nan" else album
+
+        search_type = "artist" if not track else "track_or_album"
+        entries.append(
+            {"artist": artist, "track": track, "album": album, "search_type": search_type}
+        )
+
+    return entries
+
+
+# ============================================
+# PAGE SETUP
+# ============================================
+
+st.set_page_config(
+    page_title="Music Artwork Finder",
+    page_icon="🎵",
+    layout="wide",
+)
+
+st.title("🎵 Music Artwork Finder")
+st.markdown(
+    """
+    **Quickly find and download high-quality music artwork.**
+
+    Searches iTunes for artwork by default. Add Spotify credentials in the sidebar to improve results and enable artist photo search.
+
+    ⚖️ **Legal Notice:** For internal editorial/operational use only. Album artwork is copyrighted
+    material. Consult your legal/compliance team regarding usage rights.
+    """
+)
+st.divider()
+
+st.markdown(
+    """
+    <style>
+    [data-testid="stFullScreenFrame"] button,
+    [data-testid="stImage"] button {
+        position: absolute !important;
+        top: 50% !important; left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: 44px !important; height: 44px !important;
+        background: rgba(255,255,255,0.15) !important;
+        backdrop-filter: blur(4px) !important;
+        border-radius: 50% !important;
+        border: 1.5px solid rgba(255,255,255,0.4) !important;
+        opacity: 0; transition: opacity 0.2s ease;
+    }
+    [data-testid="stImage"]:hover button { opacity: 1 !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ============================================
 # SIDEBAR
 # ============================================
+
 with st.sidebar:
     st.header("⚙️ Settings")
-    
-    # 1. Collapsible Spotify Config
+
     with st.expander("🔑 Spotify API Setup", expanded=False):
-        st.markdown("""
-        1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-        2. Create an app
-        3. Copy credentials below:
-        """)
-        default_id = os.environ.get('SPOTIFY_CLIENT_ID', '')
-        default_secret = os.environ.get('SPOTIFY_CLIENT_SECRET', '')
+        st.markdown(
+            "1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)\n"
+            "2. Create an app and copy your credentials below:"
+        )
+        spotify_client_id = st.text_input(
+            "Spotify Client ID",
+            value=os.environ.get("SPOTIFY_CLIENT_ID", ""),
+            type="password",
+        )
+        spotify_client_secret = st.text_input(
+            "Spotify Client Secret",
+            value=os.environ.get("SPOTIFY_CLIENT_SECRET", ""),
+            type="password",
+        )
 
-        spotify_client_id = st.text_input("Spotify Client ID", value=default_id, type="password")
-        spotify_client_secret = st.text_input("Spotify Client Secret", value=default_secret, type="password")
-
-    # 2. Collapsible About Section
     with st.expander("ℹ️ About This Tool", expanded=False):
-        st.markdown("""
-        ### About
-        This tool helps music industry professionals quickly find and download music artwork.
-    
-        **Features:**
-        - Search Spotify and iTunes simultaneously
-        - Bulk processing via text or CSV
-        - One-click download per image result
-        - High-resolution artwork (up to 3000x3000px)
-        """)
+        st.markdown(
+            "Helps music industry professionals find and download artwork quickly.\n\n"
+            "- Searches Spotify and iTunes for each entry (Spotify preferred, iTunes as fallback)\n"
+            "- Bulk processing via text or CSV\n"
+            "- One-click download per image result\n"
+            "- High-res artwork (up to 3000×3000px)"
+        )
 
-    # 3. Collapsible Legal Notice
     with st.expander("⚖️ Legal Notice", expanded=False):
         st.warning("*For internal editorial/operational use only.*")
-        st.markdown("""
-        Album artwork is copyrighted material. This tool is designed for legitimate business workflows - the same images you'd manually download from music platforms.
-        - ✅ Internal content management
-        - ✅ Editorial workflow efficiency
-        - ❌ Commercial redistribution
-        - ❌ Derivative works
-    
-        Images remain property of their copyright holders. Consult your legal team for questions about usage rights.
-        """)
+        st.markdown(
+            "Images remain property of their copyright holders.\n\n"
+            "✅ Internal content management  \n"
+            "✅ Editorial workflow efficiency  \n"
+            "❌ Commercial redistribution  \n"
+            "❌ Derivative works"
+        )
 
 # ============================================
-# MAIN APP - INPUT OPTIONS
+# INPUT SECTION
 # ============================================
 
-# Check if Spotify credentials are provided
 spotify_enabled = bool(spotify_client_id and spotify_client_secret)
 
 if not spotify_enabled:
-    st.warning("⚠️ Add Spotify API credentials in the sidebar to enable Spotify search. iTunes search works without credentials!")
+    st.info(
+        "ℹ️ Running in iTunes-only mode. Add Spotify credentials in the sidebar for better results "
+        "and artist photo support."
+    )
 
 st.subheader("📝 Input Music Entries")
 
-# Tabs for different input methods
-tab1, tab2 = st.tabs(["✍️ Paste Text", "📄 Upload CSV"])
-
+tab_text, tab_csv = st.tabs(["✍️ Paste Text", "📄 Upload CSV"])
 entries = []
 
-with tab1:
-    st.markdown("""
-    **Paste entries one per line:**
-    - `Artist` → Artist photo
-    - `Artist - Song` → Single/song artwork
-    - `Artist - Album` → Album artwork
-    """)
-    
-    entries_text = st.text_area(
+with tab_text:
+    st.markdown(
+        "Paste entries one per line:\n"
+        "- `Artist` → Artist photo *(requires Spotify; iTunes will return albums instead)*\n"
+        "- `Artist - Title` → Track or album artwork (both are searched)"
+    )
+    raw_text = st.text_area(
         "Music Entries",
         placeholder="The All-American Rejects\nBillie Eilish - Bad Guy\nTaylor Swift - Midnights",
         height=200,
-        label_visibility="collapsed"
+        label_visibility="collapsed",
     )
-    
-    if entries_text:
-        for line in entries_text.strip().split('\n'):
-            if line.strip():
-                # Check if line contains the delimiter ' - '
-                if ' - ' not in line:
-                    # Just artist name → Artist photo search
-                    entries.append({
-                        'artist': line.strip(),
-                        'track': '',
-                        'album': '',
-                        'search_type': 'artist'
-                    })
-                else:
-                    # Artist - Title format → Track/Album search
-                    parts = [p.strip() for p in line.split(' - ', 1)]  # Split only on first ' - '
-                    if len(parts) == 2:
-                        entries.append({
-                            'artist': parts[0],
-                            'track': parts[1],
-                            'album': parts[1],
-                            'search_type': 'track_or_album'
-                        })
+    if raw_text:
+        entries = parse_text_entries(raw_text)
 
-with tab2:
-    st.markdown("**Upload a CSV file** with columns: `Artist`, `Track`, and optionally `Album`")
-    
-    uploaded_file = st.file_uploader(
-        "Choose CSV file",
-        type=['csv'],
-        label_visibility="collapsed"
-    )
-    
+with tab_csv:
+    st.markdown("Upload a CSV with columns: `Artist` (required), `Track` (optional), `Album` (optional).")
+    uploaded_file = st.file_uploader("Choose CSV file", type=["csv"], label_visibility="collapsed")
     if uploaded_file:
-        try:
-            df = pd.read_csv(uploaded_file)
-            
-            # Check for required columns
-            if 'Artist' in df.columns:
-                for _, row in df.iterrows():
-                    artist = str(row['Artist']).strip()
-                    track = str(row.get('Track', '')).strip()
-                    album = str(row.get('Album', '')).strip()
-                    
-                    # Determine search type based on Track field
-                    if not track or track == 'nan':
-                        search_type = 'artist'
-                    else:
-                        search_type = 'track_or_album'
-                    
-                    entries.append({
-                        'artist': artist,
-                        'track': track if track != 'nan' else '',
-                        'album': album if album != 'nan' else '',
-                        'search_type': search_type
-                    })
-                st.success(f"✅ Loaded {len(entries)} entries from CSV")
-            else:
-                st.error("❌ CSV must have 'Artist' column")
-        except Exception as e:
-            st.error(f"❌ Error reading CSV: {e}")
+        entries = parse_csv_entries(uploaded_file)
+        if entries:
+            st.success(f"✅ Loaded {len(entries)} entries from CSV")
 
-# Show entry count
 if entries:
     st.info(f"📊 Ready to search {len(entries)} entries")
 
 # ============================================
-# SEARCH BUTTON AND RESULTS
+# SEARCH EXECUTION
 # ============================================
 
-if st.button("🔍 Search for Artwork", type="primary", disabled=len(entries) == 0):
-    
+if st.button("🔍 Search for Artwork", type="primary", disabled=not entries):
     results = []
-    
-    # Progress tracking
     progress_bar = st.progress(0)
-    status_text = st.empty()
-    
+    status_placeholder = st.empty()
+
     for i, entry in enumerate(entries):
-        # Better progress text for artist-only searches
-        display_text = f"{entry['artist']} - {entry['track']}" if entry['track'] else entry['artist']
-        status_text.text(f"Searching {i+1}/{len(entries)}: {display_text}")
-        
-        # Search both APIs
-        spotify_result = None
-        if spotify_enabled:
-            spotify_result = search_spotify(
-                entry['artist'], 
-                entry['track'],
+        display_label = (
+            f"{entry['artist']} — {entry['track']}"
+            if entry["track"]
+            else f"{entry['artist']} (artist photo)"
+        )
+        status_placeholder.text(f"Searching {i + 1}/{len(entries)}: {display_label}")
+
+        spotify_results = (
+            search_spotify(
+                entry["artist"],
+                entry["track"],
                 spotify_client_id,
                 spotify_client_secret,
-                entry.get('search_type', 'track_or_album')
+                entry["search_type"],
+                entry.get("album", ""),
             )
-        
-        itunes_result = search_itunes(
-            entry['artist'], 
-            entry.get('track', ''), 
-            entry.get('album', ''),
-            entry.get('search_type', 'track_or_album')
+            if spotify_enabled
+            else []
         )
-        
-        # Prefer Spotify if available, fall back to iTunes
-        options = spotify_result or itunes_result
-        best_result = options[0] if options else None
 
-        results.append({
-            'artist': entry['artist'],
-            'track': entry['track'],
-            'album': entry.get('album', ''),
-            'spotify': spotify_result,
-            'itunes': itunes_result,
-            'best': best_result,
-            'options': options  # Crucial for the gallery UI to work
-        })
-        
+        itunes_results = search_itunes(
+            entry["artist"],
+            entry["track"],
+            entry.get("album", ""),
+            entry["search_type"],
+        )
+
+        combined_options = spotify_results or itunes_results
+        best_result = combined_options[0] if combined_options else None
+
+        results.append(
+            {
+                "artist": entry["artist"],
+                "track": entry["track"],
+                "album": entry.get("album", ""),
+                "spotify_results": spotify_results,
+                "itunes_results": itunes_results,
+                "best_result": best_result,
+                "options": combined_options,
+            }
+        )
+
         progress_bar.progress((i + 1) / len(entries))
-    
-    status_text.empty()
+
+    status_placeholder.empty()
     progress_bar.empty()
-    
-    # Store results in session state
-    st.session_state['results'] = results
-    st.success(f"✅ Search complete! Found artwork for {sum(1 for r in results if r['best'])} of {len(results)} entries")
+
+    st.session_state["results"] = results
+    found = sum(1 for r in results if r["best_result"])
+    st.success(f"✅ Search complete! Found artwork for {found} of {len(results)} entries.")
 
 # ============================================
-# DISPLAY RESULTS (Gallery Mode)
+# RESULTS GALLERY
 # ============================================
+
 @st.fragment
-def render_download_button(high_res_url, filename, key):
-    img_data = download_image(high_res_url)
-    if img_data:
-        st.download_button(
-            label="⬇️ Download",
-            data=img_data,
-            file_name=filename,
-            mime="image/jpeg",
-            key=key,
-            use_container_width=True,
-        )
-    else:
-        st.button("⬇️ Unavailable", key=f"err_{key}", disabled=True, use_container_width=True)
-      
-  
-@st.fragment
-def render_image_options(i, result, options):
+def render_image_options(result_index: int, result: dict, options: list[ArtworkResult]) -> None:
+    """
+    Render a row of artwork thumbnails with immediate one-click download buttons.
+    Wrapped in @st.fragment so only this widget group reruns on interaction,
+    not the entire page — critical for performance with many results.
+    """
     num_cols = min(len(options), 5)
-    col_count = max(num_cols, 3)
-    cols = st.columns(col_count)
+    cols = st.columns(max(num_cols, 3))
 
-    track_part = result.get('track') or 'artist_photo'
+    track_part = result.get("track") or "artist_photo"
 
-    for opt_idx, opt in enumerate(options):
+    for opt_idx, option in enumerate(options):
         with cols[opt_idx]:
-            # Render image and captions
-            image_url = opt.get('preview_url') or opt.get('image_url')
-            if image_url:
-                st.image(image_url, use_container_width=True)
-            st.caption(f"{opt['album_name'][:25]}...")
-            st.caption(f"**{opt['type']}**")
+            display_url = option.get("preview_url") or option.get("image_url")
+            if display_url:
+                st.image(display_url, use_container_width=True)
 
-            # One-click download button per image
-            render_download_button(
-                high_res_url=opt.get('image_url'),
-                filename=f"{result['artist']}_{track_part}_{opt_idx + 1}.jpg".replace('/', '_'),
-                key=f"dl_{i}_{opt_idx}",
-            )
+            st.caption(f"{option['album_name'][:25]}...")
+            st.caption(f"**{option['type']}**")
 
-if 'results' in st.session_state and st.session_state['results']:
-    
+            img_data = download_image(option.get("image_url"))
+            filename = f"{result['artist']}_{track_part}_{opt_idx + 1}.jpg".replace("/", "_")
+
+            if img_data:
+                st.download_button(
+                    label="⬇️ Download",
+                    data=img_data,
+                    file_name=filename,
+                    mime="image/jpeg",
+                    key=f"dl_{result_index}_{opt_idx}",
+                    use_container_width=True,
+                )
+            else:
+                st.button(
+                    "⬇️ Unavailable",
+                    key=f"dl_err_{result_index}_{opt_idx}",
+                    disabled=True,
+                    use_container_width=True,
+                )
+
+
+if st.session_state.get("results"):
     st.divider()
     st.subheader("📊 Results")
 
-    results = st.session_state['results']
-    
-    # Summary stats
-    found_count = sum(1 for r in results if r.get('options'))
-    
+    results = st.session_state["results"]
+
+    found_count = sum(1 for r in results if r.get("options"))
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Entries", len(results))
     col2.metric("Found Artwork", found_count)
     col3.metric("Missing Artwork", len(results) - found_count)
-    
-    st.divider()
-    
-    # --- GALLERY GRID LOOP ---
-    for i, result in enumerate(results):
-        with st.container():
-            st.markdown(f"#### {i+1}. {result['artist']} — {result['track'] if result['track'] else '(Artist Search)'}")
-            
-            options = result.get('options', [])
-            
-            if not options:
-                st.warning("❌ No artwork found for this entry.")
-            else:
-                render_image_options(i, result, options)
 
-            st.divider()
+    st.divider()
+
+    for i, result in enumerate(results):
+        track_label = result["track"] if result["track"] else "(Artist Search)"
+        st.markdown(f"#### {i + 1}. {result['artist']} — {track_label}")
+
+        options = result.get("options", [])
+        if not options:
+            st.warning("❌ No artwork found for this entry.")
+        else:
+            render_image_options(i, result, options)
+
+        st.divider()
 
 # ============================================
 # FOOTER
 # ============================================
 
 st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #666; font-size: 0.9em;'>
-Built by Rosalie Cabison | Music & Tech PM
-</div>
-""", unsafe_allow_html=True)
+st.markdown(
+    "<div style='text-align: center; color: #666; font-size: 0.9em;'>"
+    "Built by Rosalie Cabison | Music & Tech PM"
+    "</div>",
+    unsafe_allow_html=True,
+)
