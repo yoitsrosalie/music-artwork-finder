@@ -151,60 +151,58 @@ def _spotify_album_search(artist: str, album: str, headers: dict) -> list[Artwor
 
 
 def _spotify_track_search(artist: str, track: str, headers: dict) -> list[ArtworkResult]:
-    """
-    Return artwork results from Spotify for a track_or_album search.
-    Collects results from both the tracks and albums sections of the response,
-    then deduplicates by image URL so the same artwork isn't shown twice.
-    """
-    response = requests.get(
+    results = []
+    seen = set()
+
+    # Query 1: search by track name
+    track_response = requests.get(
         SPOTIFY_SEARCH_URL,
         headers=headers,
-        params={"q": f"artist:{artist} {track}", "type": "track,album", "limit": 5},
+        params={"q": f"artist:{artist} track:{track}", "type": "track", "limit": 5},
     )
-    response.raise_for_status()
-    data = response.json()
-
-    results = []
-
-    # Collect from tracks (returns the parent album's artwork)
-    for item in data.get("tracks", {}).get("items", []):
+    track_response.raise_for_status()
+    for item in track_response.json().get("tracks", {}).get("items", []):
         album = item.get("album", {})
         if album.get("images"):
-            results.append({
-                "source": "Spotify",
-                "image_url": album["images"][0]["url"],
-                "width": album["images"][0]["width"],
-                "height": album["images"][0]["height"],
-                "album_name": album["name"],
-                "track_name": item["name"],
-                "type": "Single" if album.get("album_type") == "single" else "Album",
-                "found": True,
-            })
+            url = album["images"][0]["url"]
+            if url not in seen:
+                seen.add(url)
+                results.append({
+                    "source": "Spotify",
+                    "image_url": url,
+                    "width": album["images"][0]["width"],
+                    "height": album["images"][0]["height"],
+                    "album_name": album["name"],
+                    "track_name": item["name"],
+                    "type": "Single" if album.get("album_type") == "single" else "Album",
+                    "found": True,
+                })
 
-    # Collect from albums (direct album matches)
-    for item in data.get("albums", {}).get("items", []):
+    # Query 2: search by album name
+    album_response = requests.get(
+        SPOTIFY_SEARCH_URL,
+        headers=headers,
+        params={"q": f"artist:{artist} album:{track}", "type": "album", "limit": 5},
+    )
+    album_response.raise_for_status()
+    for item in album_response.json().get("albums", {}).get("items", []):
         if item.get("images"):
-            results.append({
-                "source": "Spotify",
-                "image_url": item["images"][0]["url"],
-                "width": item["images"][0]["width"],
-                "height": item["images"][0]["height"],
-                "album_name": item["name"],
-                "track_name": "",
-                "type": "Single" if item.get("album_type") == "single" else "Album",
-                "found": True,
-            })
+            url = item["images"][0]["url"]
+            if url not in seen:
+                seen.add(url)
+                results.append({
+                    "source": "Spotify",
+                    "image_url": url,
+                    "width": item["images"][0]["width"],
+                    "height": item["images"][0]["height"],
+                    "album_name": item["name"],
+                    "track_name": "",
+                    "type": "Single" if item.get("album_type") == "single" else "Album",
+                    "found": True,
+                })
 
-    # Deduplicate by image URL — track and album results often share the same artwork
-    seen = set()
-    deduped = []
-    for r in results:
-        if r["image_url"] not in seen:
-            seen.add(r["image_url"])
-            deduped.append(r)
-
-    return deduped
-
+    return results
+  
 
 def search_itunes(
     artist: str,
@@ -469,7 +467,7 @@ entries = []
 
 with tab_text:
     st.markdown(
-        "Paste entries one per line:\n"
+        "Paste or type in entries one per line:\n"
         "- `Artist` → Artist photo *(requires Spotify; iTunes will return albums instead)*\n"
         "- `Artist - Title` → Track or album artwork (both are searched)"
     )
